@@ -8,11 +8,11 @@ import re
 from datetime import datetime
 
 # ตั้งค่าหน้า Web App
-st.set_page_config(page_title="BigC Beauty Scraper", layout="wide")
+st.set_page_config(page_title="Product Image Scraper", layout="wide")
 
-st.title("💄 BigC Beauty & Personal Care Scraper")
+st.title("� Product Image Scraper")
 st.markdown("""
-แอปพลิเคชันสำหรับดึงข้อมูลสินค้าหมวด **Beauty & Personal Care** ทั้งหมดโดยอัตโนมัติ
+เครื่องมือสำหรับดึงข้อมูลสินค้าจากเว็บ E-commerce โดยอัตโนมัติ
 ระบบจะวนลูปดึงข้อมูลทีละหน้าจนครบ หรือจนกว่าจะถึงขีดจำกัดที่กำหนด
 """)
 
@@ -20,16 +20,19 @@ st.markdown("""
 with st.expander("⚙️ ตั้งค่าการดึงข้อมูล (Settings)", expanded=True):
     col1, col2 = st.columns([2, 1])
     with col1:
-        st.info("เป้าหมาย: https://www.bigc.co.th/category/beauty-personal-care")
-        base_category_url = "https://www.bigc.co.th/category/beauty-personal-care"
+        base_category_url = st.text_input(
+            "🔗 URL หมวดหมู่สินค้า",
+            value="",
+            placeholder="วาง URL หมวดหมู่สินค้าที่ต้องการ...",
+            help="ใส่ URL หมวดหมู่สินค้าที่ต้องการดึงข้อมูล"
+        )
     
     with col2:
-        # ให้ User เลือกได้ว่าจะดึงกี่หน้า (เผื่อแค่อยากเทส)
         max_pages = st.number_input(
-            "จำนวนหน้าสูงสุดที่ต้องการดึง (Max Pages)", 
+            "จำนวนหน้าสูงสุด (Max Pages)", 
             min_value=1, 
             max_value=100, 
-            value=5, # ค่าเริ่มต้นเซ็ตไว้ 5 หน้าเพื่อทดสอบเร็วๆ ถ้าจะเอาหมดให้ใส่เยอะๆ
+            value=5,
             help="ใส่เลขเยอะๆ เช่น 100 เพื่อดึงให้ครบทุกหน้าที่มี"
         )
 
@@ -37,28 +40,45 @@ with st.expander("⚙️ ตั้งค่าการดึงข้อมู�
 def scrape_all_pages(base_url, max_pages):
     all_data = []
     
-    # Placeholder สำหรับแสดงสถานะการทำงานแบบ Real-time
     status_text = st.empty()
     progress_bar = st.progress(0)
     
-    # จับเวลาตอนเริ่มดึงข้อมูล
     current_timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # สร้าง Session เพื่อเก็บ cookies อัตโนมัติ
+    session = requests.Session()
+    
+    # Headers เต็มรูปแบบเหมือน browser จริง
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept-Language': 'th-TH,th;q=0.9,en;q=0.8'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'th-TH,th;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Cache-Control': 'max-age=0',
     }
+    session.headers.update(headers)
+    
+    # เข้าหน้าแรกก่อนเพื่อรับ cookies
+    try:
+        session.get(base_url, timeout=10)
+        time.sleep(1)
+    except:
+        pass
 
-    # Loop ตามจำนวนหน้าที่กำหนด
     for page in range(1, max_pages + 1):
-        # สร้าง URL สำหรับแต่ละหน้า (query string: limit=100&page=X)
         current_url = f"{base_url}?limit=100&page={page}"
         
-        status_text.text(f"กำลังดึงข้อมูล... หน้าที่ {page}/{max_pages} ({current_url})")
+        status_text.text(f"กำลังดึงข้อมูล... หน้าที่ {page}/{max_pages}")
         progress_bar.progress(page / max_pages)
 
         try:
-            response = requests.get(current_url, headers=headers, timeout=10)
+            response = session.get(current_url, timeout=15)
             
             if response.status_code != 200:
                 st.warning(f"หน้า {page} โหลดไม่สำเร็จ (Status: {response.status_code}) ข้ามไปหน้าถัดไป...")
@@ -66,33 +86,26 @@ def scrape_all_pages(base_url, max_pages):
                 
             soup = BeautifulSoup(response.content, 'html.parser')
             
-            # ค้นหา Container ของสินค้า
             product_cards = soup.find_all('div', class_=re.compile(r'productCard_container_'))
             
-            # ถ้าหน้านี้ไม่มีสินค้าเลย แสดงว่าหมดแล้ว -> หยุด Loop ทันที
             if not product_cards:
                 status_text.success(f"สิ้นสุดข้อมูลที่หน้า {page-1}")
                 break
 
-            # วนลูปสินค้าในหน้านั้นๆ
             for card in product_cards:
                 item = {}
                 
-                # 0. Scraped Date (เพิ่มวันที่ดึงข้อมูล)
                 item['Scraped Date'] = current_timestamp
 
-                # 1. Product Name
                 name_el = card.find(class_=re.compile(r'productCard_title_'))
                 item['Product Name'] = name_el.get_text(strip=True) if name_el else "N/A"
                 
-                # 2. Images & Barcode Extraction
                 img_el = card.find('img')
                 if img_el:
                     img_url = img_el.get('src') or img_el.get('data-src')
                     item['Image URL'] = img_url
                     
                     if img_url:
-                        # หาตัวเลข 8-14 หลักใน URL
                         barcode_match = re.search(r'(\d{8,14})', img_url)
                         item['Barcode'] = barcode_match.group(1) if barcode_match else ""
                     else:
@@ -101,7 +114,6 @@ def scrape_all_pages(base_url, max_pages):
                     item['Image URL'] = ""
                     item['Barcode'] = ""
 
-                # 3. Prices
                 price_container = card.find(class_=re.compile(r'productCard_price_'))
                 if price_container:
                     prices_text = price_container.get_text(strip=True)
@@ -122,7 +134,6 @@ def scrape_all_pages(base_url, max_pages):
 
                 all_data.append(item)
             
-            # หน่วงเวลาสุ่ม 1-2 วินาที ก่อนไปหน้าถัดไป (กันโดนบล็อก)
             time.sleep(random.uniform(0.5, 1.5))
 
         except Exception as e:
@@ -132,32 +143,31 @@ def scrape_all_pages(base_url, max_pages):
     return pd.DataFrame(all_data)
 
 # ปุ่ม One-Click
-if st.button("🚀 เริ่มดึงข้อมูลทั้งหมด (Start Scraping)", type="primary"):
-    
-    df = scrape_all_pages(base_category_url, max_pages)
-    
-    if not df.empty:
-        st.success(f"เสร็จสิ้น! ดึงข้อมูลมาได้ทั้งหมด {len(df)} รายการ")
-        
-        # แสดงข้อมูล
-        st.dataframe(
-            df,
-            column_config={
-                "Image URL": st.column_config.ImageColumn("Image"),
-            },
-            use_container_width=True
-        )
-        
-        # ปุ่มดาวน์โหลด
-        csv = df.to_csv(index=False).encode('utf-8-sig')
-        # สร้างชื่อไฟล์ให้มีวันที่แปะท้ายด้วย เพื่อให้แยกไฟล์ง่ายๆ
-        filename = f'bigc_beauty_products_{datetime.now().strftime("%Y%m%d_%H%M")}.csv'
-        
-        st.download_button(
-            label=f"💾 ดาวน์โหลดข้อมูล {len(df)} รายการ (CSV)",
-            data=csv,
-            file_name=filename,
-            mime='text/csv',
-        )
+if st.button("🚀 เริ่มดึงข้อมูล (Start Scraping)", type="primary"):
+    if not base_category_url:
+        st.error("กรุณาใส่ URL ก่อนเริ่มดึงข้อมูล")
     else:
-        st.warning("ไม่พบข้อมูลสินค้าเลย อาจมีการเปลี่ยนแปลงที่หน้าเว็บ")
+        df = scrape_all_pages(base_category_url, max_pages)
+        
+        if not df.empty:
+            st.success(f"เสร็จสิ้น! ดึงข้อมูลมาได้ทั้งหมด {len(df)} รายการ")
+            
+            st.dataframe(
+                df,
+                column_config={
+                    "Image URL": st.column_config.ImageColumn("Image"),
+                },
+                use_container_width=True
+            )
+            
+            csv = df.to_csv(index=False).encode('utf-8-sig')
+            filename = f'products_{datetime.now().strftime("%Y%m%d_%H%M")}.csv'
+            
+            st.download_button(
+                label=f"💾 ดาวน์โหลดข้อมูล {len(df)} รายการ (CSV)",
+                data=csv,
+                file_name=filename,
+                mime='text/csv',
+            )
+        else:
+            st.warning("ไม่พบข้อมูลสินค้า อาจมีการเปลี่ยนแปลงที่หน้าเว็บ")
